@@ -1,0 +1,175 @@
+name: Build Windows Installer
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version string for this build (e.g. 1.0.0)"
+        required: false
+        default: "dev"
+      ffvship_variant:
+        description: "FFVship GPU backend to bundle"
+        required: true
+        default: "nvidia"
+        type: choice
+        options:
+          - nvidia
+          - amd
+          - vulkan
+      create_release:
+        description: "Publish a GitHub Release with the installer"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like "refs/tags/*") {
+            $version = $env:GITHUB_REF -replace 'refs/tags/v?', ''
+          } else {
+            $version = "${{ github.event.inputs.version }}"
+            if ([string]::IsNullOrWhiteSpace($version)) { $version = "dev" }
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Determine FFVship variant
+        id: variant
+        shell: pwsh
+        run: |
+          $variant = "${{ github.event.inputs.ffvship_variant }}"
+          if ([string]::IsNullOrWhiteSpace($variant)) { $variant = "nvidia" }
+          $assetMap = @{
+            "nvidia" = "FFVship_nvidia.zip"
+            "amd"    = "FFVship_amd.zip"
+            "vulkan" = "FFVship_Vulkan.zip"
+          }
+          echo "variant=$variant" >> $env:GITHUB_OUTPUT
+          echo "asset=$($assetMap[$variant])" >> $env:GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pyinstaller-hooks-contrib
+
+      - name: Create build directories
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build\bin | Out-Null
+          New-Item -ItemType Directory -Force -Path build\bin\FFVship | Out-Null
+          New-Item -ItemType Directory -Force -Path installer\staging | Out-Null
+
+      # ---- Download a static ffmpeg build (ffmpeg.exe + ffprobe.exe) ----
+      - name: Download ffmpeg
+        shell: pwsh
+        run: |
+          $ffmpegZip = "$env:RUNNER_TEMP\ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $ffmpegZip
+          Expand-Archive -Path $ffmpegZip -DestinationPath "$env:RUNNER_TEMP\ffmpeg" -Force
+          $binDir = Get-ChildItem -Path "$env:RUNNER_TEMP\ffmpeg" -Recurse -Directory -Filter "bin" | Select-Object -First 1
+          Copy-Item "$($binDir.FullName)\ffmpeg.exe" "build\bin\ffmpeg.exe"
+          Copy-Item "$($binDir.FullName)\ffprobe.exe" "build\bin\ffprobe.exe"
+
+      # ---- Download FFVship from Codeberg (latest release) ----
+      - name: Download FFVship
+        shell: pwsh
+        run: |
+          $asset = "${{ steps.variant.outputs.asset }}"
+          $release = Invoke-RestMethod -Uri "https://codeberg.org/api/v1/repos/Line-fr/Vship/releases/latest"
+          $downloadUrl = ($release.assets | Where-Object { $_.name -eq $asset }).browser_download_url
+          if (-not $downloadUrl) {
+            throw "Could not find asset '$asset' in latest Vship release"
+          }
+          Write-Host "Downloading $downloadUrl"
+          $zipPath = "$env:RUNNER_TEMP\ffvship.zip"
+          Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath "$env:RUNNER_TEMP\ffvship" -Force
+
+          # Normalize: find ffvship.exe wherever it landed and flatten its folder into build\bin\FFVship
+          $exe = Get-ChildItem -Path "$env:RUNNER_TEMP\ffvship" -Recurse -Filter "ffvship.exe" | Select-Object -First 1
+          if (-not $exe) { throw "ffvship.exe not found in downloaded archive" }
+          Copy-Item -Path "$($exe.Directory.FullName)\*" -Destination "build\bin\FFVship" -Recurse -Force
+
+      # ---- Freeze the Python app with PyInstaller ----
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --windowed --noupx `
+            --name "AutoTargetEncoder" `
+            --distpath "build\dist" `
+            --workpath "build\work" `
+            --specpath "build" `
+            --collect-all customtkinter `
+            --collect-all sklearn `
+            "Auto Target Encoder.pyw"
+
+      # ---- Assemble the installer staging folder ----
+      - name: Stage installer files
+        shell: pwsh
+        run: |
+          $stage = "installer\staging"
+          Copy-Item -Path "build\dist\AutoTargetEncoder\*" -Destination $stage -Recurse -Force
+          New-Item -ItemType Directory -Force -Path "$stage\bin" | Out-Null
+          Copy-Item "build\bin\ffmpeg.exe" "$stage\bin\ffmpeg.exe"
+          Copy-Item "build\bin\ffprobe.exe" "$stage\bin\ffprobe.exe"
+          Copy-Item "build\bin\FFVship" "$stage\bin\FFVship" -Recurse -Force
+          Copy-Item "LICENSE" "$stage\LICENSE.txt" -ErrorAction SilentlyContinue
+          Copy-Item "README.md" "$stage\README.md" -ErrorAction SilentlyContinue
+
+          # Build config.ini.default with path placeholders for Inno Setup to fill in at install time
+          $config = Get-Content "config.ini" -Raw
+          $config = $config -replace 'ffmpeg_path\s*=.*',    'ffmpeg_path = {{FFMPEG}}'
+          $config = $config -replace 'ffprobe_path\s*=.*',   'ffprobe_path = {{FFPROBE}}'
+          $config = $config -replace 'ffvship_path\s*=.*',   'ffvship_path = {{FFVSHIP}}'
+          $config = $config -replace 'database_path\s*=.*',  'database_path = {{DBPATH}}'
+          $config = $config -replace 'encoding_log_path\s*=.*', 'encoding_log_path = {{LOGPATH}}'
+          Set-Content -Path "$stage\config.ini.default" -Value $config
+
+      # ---- Compile the installer with Inno Setup ----
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc `
+            "/DMyAppVersion=${{ steps.ver.outputs.version }}" `
+            "/DVariant=${{ steps.variant.outputs.variant }}" `
+            "installer\installer.iss"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoTargetEncoder-Setup-${{ steps.variant.outputs.variant }}-${{ steps.ver.outputs.version }}
+          path: installer\output\*.exe
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.create_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || format('v{0}', steps.ver.outputs.version) }}
+          files: installer\output\*.exe
+          generate_release_notes: true
