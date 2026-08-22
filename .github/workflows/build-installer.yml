@@ -85,9 +85,12 @@ jobs:
       - name: Download ffmpeg
         shell: pwsh
         run: |
-          $ffmpegZip = "$env:RUNNER_TEMP\ffmpeg.zip"
-          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.zip" -OutFile $ffmpegZip
-          Expand-Archive -Path $ffmpegZip -DestinationPath "$env:RUNNER_TEMP\ffmpeg" -Force
+          $ffmpeg7z = "$env:RUNNER_TEMP\ffmpeg.7z"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z" -OutFile $ffmpeg7z
+      
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          & $sevenZip x $ffmpeg7z "-o$env:RUNNER_TEMP\ffmpeg" -y
+      
           $binDir = Get-ChildItem -Path "$env:RUNNER_TEMP\ffmpeg" -Recurse -Directory -Filter "bin" | Select-Object -First 1
           Copy-Item "$($binDir.FullName)\ffmpeg.exe" "build\bin\ffmpeg.exe"
           Copy-Item "$($binDir.FullName)\ffprobe.exe" "build\bin\ffprobe.exe"
