@@ -2016,7 +2016,7 @@ def calculate_vmaf (encoded_path :str ,reference_path :str ,n_threads :int ,prog
         '-lavfi',filter_string ,'-f','null','-']
 
         result =subprocess .run (cmd ,capture_output =True ,text =True ,encoding ='utf-8',
-        check =False ,env =FFMPEG_ENV ,creationflags =SUBPROCESS_FLAGS ,timeout =300 )
+        check =False ,env =FFMPEG_ENV ,creationflags =SUBPROCESS_FLAGS ,timeout =900 )
 
         if result .returncode !=0 :
             raise RuntimeError (f"FFmpeg failed with code {result .returncode }")
@@ -2081,7 +2081,7 @@ def calculate_score_with_FFVShip (reference_path :str ,distorted_path :str ,metr
 
     try :
         result =subprocess .run (cmd ,capture_output =True ,text =True ,check =False ,
-        timeout =300 ,creationflags =SUBPROCESS_FLAGS )
+        timeout =900 ,creationflags =SUBPROCESS_FLAGS )
 
         if result .returncode !=0 :
             raise RuntimeError (f"FFVShip failed with code {result .returncode }: {result .stderr }")
@@ -2114,7 +2114,7 @@ def get_tier1_samples (input_path :str ,log_callback ,task_id :int ,video_durati
         ]
 
         result =subprocess .run (cmd ,capture_output =True ,text =True ,encoding ='utf-8',
-        env =FFMPEG_ENV ,timeout =300 ,creationflags =SUBPROCESS_FLAGS )
+        env =FFMPEG_ENV ,timeout =900 ,creationflags =SUBPROCESS_FLAGS )
 
         timestamps =[]
         time_pattern =re .compile (r'pts_time:([\d\.]+)')
@@ -2389,7 +2389,7 @@ log_callback ,video_stream :Dict )->tuple [bytes ,float ]:
     '-f','matroska','pipe:1'
     ]
 
-    result =subprocess .run (cmd ,capture_output =True ,env =FFMPEG_ENV ,timeout =300 ,creationflags =SUBPROCESS_FLAGS )
+    result =subprocess .run (cmd ,capture_output =True ,env =FFMPEG_ENV ,timeout =900 ,creationflags =SUBPROCESS_FLAGS )
     if result .returncode !=0 :
         raise RuntimeError (f"Master sample creation failed: {result .stderr .decode ('utf-8',errors ='ignore')}")
 
@@ -3307,7 +3307,7 @@ metrics :dict ,log_callback ,timings :dict ,callback_queue :queue .Queue ,video_
     stuck_at_100_time =None
     monitor_exception =None
 
-    MAX_IDLE_TIME =300
+    MAX_IDLE_TIME =900
     MAX_STUCK_AT_100_TIME =120
     PROGRESS_TIMEOUT =600
 
