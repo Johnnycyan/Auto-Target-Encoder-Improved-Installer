@@ -35,6 +35,21 @@ import pickle
 import warnings 
 warnings .filterwarnings ('ignore')
 
+# Frozen (PyInstaller --windowed) builds have no valid stdin handle, which
+# can cause child processes like ffmpeg to block indefinitely instead of
+# running normally. Default stdin to DEVNULL everywhere unless a call site
+# explicitly overrides it.
+_orig_run = subprocess.run
+def _run_no_stdin(*args, **kwargs):
+    kwargs.setdefault("stdin", subprocess.DEVNULL)
+    return _orig_run(*args, **kwargs)
+subprocess.run = _run_no_stdin
+
+_orig_popen_init = subprocess.Popen.__init__
+def _popen_init_no_stdin(self, *args, **kwargs):
+    kwargs.setdefault("stdin", subprocess.DEVNULL)
+    return _orig_popen_init(self, *args, **kwargs)
+subprocess.Popen.__init__ = _popen_init_no_stdin
 
 ctk .set_appearance_mode ("dark")
 ctk .set_default_color_theme ("blue")
