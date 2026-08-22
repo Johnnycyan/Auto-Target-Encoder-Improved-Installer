@@ -86,7 +86,7 @@ jobs:
         shell: pwsh
         run: |
           $ffmpegZip = "$env:RUNNER_TEMP\ffmpeg.zip"
-          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $ffmpegZip
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.zip" -OutFile $ffmpegZip
           Expand-Archive -Path $ffmpegZip -DestinationPath "$env:RUNNER_TEMP\ffmpeg" -Force
           $binDir = Get-ChildItem -Path "$env:RUNNER_TEMP\ffmpeg" -Recurse -Directory -Filter "bin" | Select-Object -First 1
           Copy-Item "$($binDir.FullName)\ffmpeg.exe" "build\bin\ffmpeg.exe"
